@@ -1,0 +1,20 @@
+# aws cloudformation deploy --template-file backend.yaml --stack-name terraform-backend
+Resources:
+  TerraformS3:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: mhc-terraform-state
+      VersioningConfiguration:
+        Status: Enabled
+
+  TerraformLockTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      BillingMode: PAY_PER_REQUEST
+      KeySchema: 
+        - AttributeName: LockID
+          KeyType: HASH
+      TableName: mhc-terraform-lock
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
