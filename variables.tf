@@ -1,13 +1,3 @@
-variable "cicd_acct_name" {
-  type = string
-  default = "mhc-cicd"
-}
-
-variable "cicd_acct_id" {
-  type = string
-  default = "255013836461"
-}
-
 
 # variable "accounts" {
 #   type = map
