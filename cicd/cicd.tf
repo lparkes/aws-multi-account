@@ -19,7 +19,33 @@ resource "aws_codecommit_repository" "app" {
 }
 
 resource "aws_ecr_repository" "app" {
-  name                 = var.app
+  name = var.app
+}
+
+resource "aws_ecr_repository_policy" "app" {
+  repository = aws_ecr_repository.app.name
+
+  policy = <<POLICY
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "PullAccessFromOtherAccounts",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [
+                    "arn:aws:iam::008062881613:root"
+                ]
+            },
+            "Action": [
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+                "ecr:BatchCheckLayerAvailability"
+            ]
+        }
+    ]
+}
+POLICY
 }
 
 resource "aws_ecr_lifecycle_policy" "app_policy" {
