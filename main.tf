@@ -51,7 +51,7 @@ module "gollumdev" {
     cpu          = 256
     memory       = 512
     port         = 80
-    count        = 0
+    count        = var.task_count
     health_check = "/"
   }
 

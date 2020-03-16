@@ -1,4 +1,9 @@
 
+variable "task_count" {
+  type    = number
+  default = 0
+}
+
 # variable "accounts" {
 #   type = map
 #   default = {
