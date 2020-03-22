@@ -133,7 +133,7 @@ resource "aws_iam_role" "deploy" {
     {
       "Action": "sts:AssumeRole",
       "Principal": {
-	"AWS": "arn:aws:iam::${var.cicd_acct_id}:root"
+	"AWS": "arn:aws:iam::${var.cicd_acct_id}:root",
       },
       "Effect": "Allow"
     }
@@ -141,26 +141,6 @@ resource "aws_iam_role" "deploy" {
 }
 POLICY
   
-}
-
-resource "aws_iam_role_policy" "ecs" {
-  name = "ecs"
-  role = aws_iam_role.deploy.name
-
-  policy = <<POLICY
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-	"ec2:*"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-POLICY
 }
 
 resource "aws_iam_role_policy" "cloudformation" {
@@ -202,4 +182,41 @@ resource "aws_iam_role_policy" "iam" {
   ]
 }
 POLICY
+}
+
+resource "aws_iam_role_policy" "kms" {
+  name = "iam"
+  role = aws_iam_role.deploy.name
+
+  policy = <<POLICY
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "kms:Decrypt",
+                "kms:Encrypt",
+                "kms:GenerateDataKey",
+                "kms:ReEncryptTo",
+                "kms:DescribeKey",
+                "kms:ReEncryptFrom"
+            ],
+            "Resource": "arn:aws:kms:ap-southeast-2:${var.cicd_acct_id}:*"
+        }
+    ]
+}
+POLICY
+}
+
+
+resource "aws_iam_role_policy_attachment" "s3" {
+  role       = aws_iam_role.deploy.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
+
+# FIXME - full access??
+resource "aws_iam_role_policy_attachment" "deploy_ecs" {
+  role       = aws_iam_role.deploy.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonECS_FullAccess"
 }

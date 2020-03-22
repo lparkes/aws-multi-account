@@ -60,3 +60,18 @@ variable "app" {
   type        = string
   description = "A short name for the application"
 }
+
+variable "dns_name" {
+  type        = string
+  description = "The unqualified DNS name for the application"
+}
+
+variable "dns_root" {
+  type        = string
+  description = "The FQDN of the DNS zone"
+}
+
+variable "dns_zone_id" {
+  type        = string
+  description = "The aws_route53_zone id"
+}

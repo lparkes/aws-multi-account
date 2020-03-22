@@ -124,9 +124,14 @@ resource "aws_ecs_service" "app" {
     container_name   = var.app
     container_port   = var.container.port
   }
+
+  lifecycle {
+    ignore_changes = [ desired_count ]
+  }
 }
 
 resource "aws_lb_target_group" "app" {
+  name                 = var.app
   protocol             = "HTTP"
   port                 = var.container.port
   vpc_id               = aws_vpc.dev.id
@@ -150,6 +155,10 @@ resource "aws_lb_target_group" "app" {
     Environment = var.env
     Application = var.app
   }
+  
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_lb_listener_rule" "app" {
@@ -163,7 +172,7 @@ resource "aws_lb_listener_rule" "app" {
   condition {
     # FIXME
     host_header {
-      values = [ "gollum-dev.must-have-coffee.com" ]
+      values = [ "www-dev.apps.must-have-coffee.com" ]
     }
   }
 }
@@ -191,9 +200,17 @@ resource "aws_security_group" "alb" {
   vpc_id      = aws_vpc.dev.id
 
   ingress {
-    description     = "Access from ALB"
+    description     = "Access to ALB listener"
     from_port       = 443
     to_port         = 443
+    protocol        = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description     = "Access to ALB listener"
+    from_port       = 80
+    to_port         = 80
     protocol        = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -218,139 +235,36 @@ resource "aws_lb_listener" "app" {
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.default.arn
+    target_group_arn = aws_lb_target_group.app.arn
   }
 }
 
-resource "aws_lb_target_group" "default" {
-  protocol             = "HTTP"
-  port                 = 80
-  vpc_id               = aws_vpc.dev.id
-  #target_type          = "ip"
-  #deregistration_delay = 30
+# resource "aws_lb_target_group" "default" {
+#   name                 = var.app
+#   protocol             = "HTTP"
+#   port                 = 80
+#   vpc_id               = aws_vpc.dev.id
+#   target_type          = "ip"
+#   #deregistration_delay = 30
 
-  # stickiness {
-  #   type            = "lb_cookie"
-  #   enabled         = true	# The default
-  #   cookie_duration = 86400	# 1 day (the default)
-  # }
+#   stickiness {
+#     type            = "lb_cookie"
+#     enabled         = true	# The default
+#     cookie_duration = 86400	# 1 day (the default)
+#   }
   
-  health_check {
-    path     = "/internal/healthcheck"
-    protocol = "HTTP"
-    #matcher  = "200-404"
-  }
+#   health_check {
+#     path     = "/internal/healthcheck"
+#     protocol = "HTTP"
+#     #matcher  = "200-404"
+#   }
   
-  tags = {
-    Description = "Default target group"
-    Environment = var.env
-  }
-}
+#   tags = {
+#     Description = "Default target group"
+#     Environment = var.env
+#   }
 
-
-
-# Outputs:
-#   Authentication:
-#     Description: Whether the app is public or requires authentication
-#     Value: !Ref Authentication
-# Description: Deploy a Fargate ECS Service
-# Parameters:
-#   CloudFormationS3Bucket:
-#     Type: String
-#     Description: The S3 bucket that contains our CloudFormation templates
-#     Default: https://cloudformation-918771490342-dev.s3-ap-southeast-2.amazonaws.com/
-#   LambdaS3Bucket:
-#     Type: String
-#     Description: The S3 bucket that contains out CloudFormation templates
-#     Default: https://lambda-918771490342-dev.s3-ap-southeast-2.amazonaws.com/
-#   ALBStackName:
-#     Type: String
-#     Description: Name of the stack that contains the ALB
-#   ApplicationName:
-#     Type: String
-#     Description: The name of the application
-#   Authentication:
-#     Type: String
-#     Default: "True"
-#     Description: Whether the app requires OpenId authentication
-#   ContainerPort:
-#     Type: Number
-#     Description: Container port
-#     Default: 80
-#   ContainerMemory:
-#     Type: Number
-#     Description: Maximum memory available to the container (Not all combinations of Memory/CPU are valid!)
-#     Default: 512
-#     AllowedValues:
-#       - 256
-#       - 512
-#       - 1024
-#       - 2048
-#       - 4096
-#       - 8192
-#   ContainerCpu:
-#     Type: Number
-#     Description: CPU available to the container (Not all combinations of Memory/CPU are valid!)
-#     Default: 512
-#     AllowedValues:
-#       - 256
-#       - 512
-#       - 1024
-#       - 2048
-#       - 4096
-#   DesiredContainerCount:
-#     Type: Number
-#     Default: 0
-#     Description: How many containers to run
-#   DockerImage:
-#     Type: String
-#     Description: Docker image to deploy
-#   Environment:
-#     Type: String
-#     Description: Environment
-#     AllowedValues:
-#       - dev
-#       - test
-#       - prod
-#   HealthCheckPath:
-#     Type: String
-#     Default: /
-#     Description: Path of the healthcheck
-#   Hostname:
-#     Type: String
-#     Description: Hostname for the app
-#   ECRAccountId:
-#     Type: Number
-#     Description: AWS Account where the ECS repo is
-#     Default: 563417596324
-#   IamRoleStackName:
-#     Type: String
-#     Description: Name of the stack that contains the IAM role for the Fargate tasks
-#   ECRImageTag:
-#     Type: String
-#     Description: Do not use
-#     Default: latest
-#   IMSDEAAPIImageTag:
-#     Type: String
-#     Description: Do not use
-#     Default: latest
-#   IMSDEAAPIImageName:
-#     Type: String
-#     Description: Docker image to deploy
-#   VPCStackName:
-#     Type: String
-#     Description: Name of the stack that contains the subnets
-#   DBName:
-#     Type: String
-#     Description: mos database
-#     Default: mosdb
-#   DBConPoolSize:
-#     Type: Number
-#     Default: 5
-#     Description: The number of workers spawned by the WSGI (gunicorn)
-#   WSGIWorkers:
-#     Type: Number
-#     Default: 4
-#     Description: The number of workers spawned by the WSGI (gunicorn)
-# Conditions:
-#   IsAuthenticated: !Equals [!Ref Authentication, "True"]
+#   lifecycle {
+#     create_before_destroy = true
+#   }
+# }

@@ -1,5 +1,6 @@
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+data "aws_canonical_user_id" "current_user" {}
 
 variable "app" {
   type = string
@@ -11,6 +12,15 @@ variable "app_description" {
 
 variable "account_id" {
   type = string
+}
+
+variable "cicd_stages" {
+  type = list(map(string))
+}
+
+variable "dns_root" {
+  type        = string
+  description = "The FQDN of the DNS zone"
 }
 
 resource "aws_codecommit_repository" "app" {
@@ -74,7 +84,38 @@ EOF
 
 resource "aws_s3_bucket" "codepipeline_bucket" {
   bucket = "mhc-cicd-codepipeline"
-  acl    = "private"
+  #acl    = "private"
+  
+  grant {
+    id          = data.aws_canonical_user_id.current_user.id
+    type        = "CanonicalUser"
+    permissions = ["FULL_CONTROL"]
+  }
+  
+  grant {
+    id          = var.cicd_stages[0].canon_id
+    type        = "CanonicalUser"
+    permissions = ["FULL_CONTROL"]
+  }
+  
+  policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [ "arn:aws:iam::008062881613:root",
+                 "arn:aws:iam::008062881613:role/deploy-dev"
+        ]
+      },
+      "Resource": [ "arn:aws:s3:::mhc-cicd-codepipeline/*",
+                    "arn:aws:s3:::mhc-cicd-codepipeline" ],
+      "Action": [ "s3:Get*", "s3:List*" ]
+    }
+  ]
+}
+POLICY
 }
 
 # Create a role that allows AWS CodePipeline to assume it
@@ -105,6 +146,13 @@ resource "aws_iam_role_policy" "codepipeline_policy" {
 {
   "Version": "2012-10-17",
   "Statement": [
+    {
+      "Effect":"Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": [
+        "arn:aws:iam::008062881613:role/deploy-dev"
+      ]
+    },
     {
       "Effect":"Allow",
       "Action": [
@@ -149,10 +197,10 @@ resource "aws_codepipeline" "app" {
     location = aws_s3_bucket.codepipeline_bucket.bucket
     type     = "S3"
 
-    # encryption_key {
-    #   id   = "${data.aws_kms_alias.s3kmskey.arn}"
-    #   type = "KMS"
-    # }
+    encryption_key {
+      id   = aws_kms_alias.mhc_cicd.arn
+      type = "KMS"
+    }
   }
 
   stage {
@@ -164,7 +212,7 @@ resource "aws_codepipeline" "app" {
       owner            = "AWS"
       provider         = "CodeCommit"
       version          = "1"
-      output_artifacts = ["build_input"]
+      output_artifacts = ["source"]
 
       configuration = {
         RepositoryName = aws_codecommit_repository.app.repository_name
@@ -181,8 +229,8 @@ resource "aws_codepipeline" "app" {
       category         = "Build"
       owner            = "AWS"
       provider         = "CodeBuild"
-      input_artifacts  = ["build_input"]
-      output_artifacts = ["build_output"]
+      input_artifacts  = ["source"]
+      output_artifacts = ["imgdefs"]
       version          = "1"
       #role_arn         = aws_iam_role.codebuild.arn
       
@@ -192,30 +240,29 @@ resource "aws_codepipeline" "app" {
     }
   }
 
-  # stage {
-  #   name = "Deploy"
+  stage {
+    name = "Deploy"
+    
+    action {
+      name            = "deploy-${var.cicd_stages[0].name}"
+      category        = "Deploy"
+      owner           = "AWS"
+      provider        = "ECS"
+      input_artifacts = ["imgdefs"]
+      version         = "1"
+      role_arn = "arn:aws:iam::${var.cicd_stages[0].acct_id}:role/deploy-${var.cicd_stages[0].name}"
 
-  #   action {
-  #     name            = "Deploy"
-  #     category        = "Deploy"
-  #     owner           = "AWS"
-  #     provider        = "CloudFormation"
-  #     input_artifacts = ["build_output"]
-  #     version         = "1"
-
-  #     configuration = {
-  #       ActionMode     = "REPLACE_ON_FAILURE"
-  #       Capabilities   = "CAPABILITY_AUTO_EXPAND,CAPABILITY_IAM"
-  #       OutputFileName = "CreateStackOutput.json"
-  #       StackName      = "MyStack"
-  #       TemplatePath   = "build_output::sam-templated.yaml"
-  #     }
-  #   }
-  # }
+      configuration = {
+        ClusterName = "arn:aws:ecs:ap-southeast-2:${var.cicd_stages[0].acct_id}:cluster/${var.app}-${var.cicd_stages[0].name}"
+        ServiceName = "arn:aws:ecs:ap-southeast-2:${var.cicd_stages[0].acct_id}:service/${var.app}-${var.cicd_stages[0].name}/${var.app}"
+        #filename
+      }
+    }
+  }
 }
 
 resource "aws_codebuild_project" "build" {
-  name          = var.app
+  name          = "build-${var.app}"
   description   = "Build project for ${var.app}"
   #build_timeout = "5"
   service_role  = aws_iam_role.codebuild.arn
@@ -224,6 +271,8 @@ resource "aws_codebuild_project" "build" {
     type = "CODEPIPELINE"
   }
 
+  encryption_key = aws_kms_key.mhc_cicd.arn
+  
   # cache {
   #   type     = "S3"
   #   location = "${aws_s3_bucket.example.bucket}"
@@ -397,4 +446,100 @@ resource "aws_iam_role_policy" "codebuild" {
   ]
 }
 POLICY
+}
+
+resource "aws_kms_key" "mhc_cicd" {
+  description              = "Key with custom access for cross account CI/CD"
+  key_usage                = "ENCRYPT_DECRYPT"
+  customer_master_key_spec = "SYMMETRIC_DEFAULT"
+
+  policy =<<POLICY
+{
+    "Version": "2012-10-17",
+    "Id": "s3-custom-key",
+
+    "Statement": [
+
+
+        {
+            "Sid": "Allow access through S3 for all principals in the account that are authorized to use S3",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "*"
+            },
+            "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:ReEncrypt*",
+                "kms:GenerateDataKey*",
+                "kms:DescribeKey"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "kms:ViaService": "s3.ap-southeast-2.amazonaws.com",
+                    "kms:CallerAccount": "255013836461"
+                }
+            }
+        },
+
+        {
+            "Sid": "Allow use of the key",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [
+                    "arn:aws:iam::008062881613:role/deploy-dev"
+                ]
+            },
+            "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:ReEncrypt*",
+                "kms:GenerateDataKey*",
+                "kms:DescribeKey"
+            ],
+            "Resource": "*"
+        },
+
+        {
+            "Sid": "Allow access for Key Administrators",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [ "arn:aws:iam::255013836461:root",
+                         "arn:aws:iam::255013836461:role/mhc-cicd_Admin" ]
+            },
+            "Action": [
+                "kms:Create*",
+                "kms:Describe*",
+                "kms:Enable*",
+                "kms:List*",
+                "kms:Put*",
+                "kms:Update*",
+                "kms:Revoke*",
+                "kms:Disable*",
+                "kms:Get*",
+                "kms:Delete*",
+                "kms:TagResource",
+                "kms:UntagResource",
+                "kms:ScheduleKeyDeletion",
+                "kms:CancelKeyDeletion"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+POLICY
+}
+
+#                    "arn:aws:iam::BUILD_ACCOUNT_ID:role/CODE_PIPELINE_ROLE",
+#                    "arn:aws:iam::BUILD_ACCOUNT_ID:role/CODE_BUILD_ROLE"
+
+
+resource "aws_kms_alias" "mhc_cicd" {
+  name          = "alias/mhc/cicd"
+  target_key_id = aws_kms_key.mhc_cicd.key_id
+}
+
+resource "aws_route53_zone" "app" {
+  name = "${var.dns_root}."
 }
